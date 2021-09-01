@@ -27,14 +27,6 @@ float mean(int** arr, struct Frame* f){
     return res;
 }
 
-void replace(int** from, int** to, struct Frame* f){
-    /* Replace values of array 'to' inside of the frame 'f'. */
-    int i, j;
-    for (i = f->y1; i < f->y2; i++)
-        for (j = f->x1; j < f->x2; j++)
-            to[i][j] = from[i][j];
-}
-
 int any(int** arr, struct Frame* f){
     /* Return true if any value inside the frame is true. */
     int i, j;
@@ -55,14 +47,36 @@ int all(int** arr, struct Frame* f){
     return 1;
 }
 
+void get_inner_frame(int y,
+                     int x,
+                     int tb,
+                     int lr,
+                     struct Shape* size,
+                     struct Frame* out){
+    // Top coord
+    out->y1 = y - tb;
+    if (out->y1 < 0)
+        out->y1 = 0;
+    // Bottom coord
+    out->y2 = y + tb;
+    if (out->y2 > size->y)
+        out->y2 = size->y;
+    // Left coord
+    out->x1 = x - lr;
+    if (out->x1 < 0)
+        out->x1 = 0;
+    // Right coord
+    out->x2 = x + lr;
+    if (out->x2 > size->x)
+        out->x2 = size->x;
+}
+
 void mfilter(int** arr,
              int** prev_arr,
              int** out_arr,
              struct Shape* size,
              struct Shape* conv,
              float threshold){
-    /* Replace all subarrays of 'prev_arr' that have changed more
-       than 'threshold' with values of new array 'arr'. */
 
     // Generate a difference map between arr and prev_arr
     // (0 is differing pixel, 1 -- identical)
@@ -81,37 +95,39 @@ void mfilter(int** arr,
         }
     }
     // Fill the out_arr
-    int y1 = 0;
-    int x1 = 0;
-    int y2 = size->y % conv->y;
-    if (y2 == 0)
-        y2 = conv->y;
-    int x2 = size->x % conv->x;
-    if (x2 == 0)
-        x2 = conv->x;
-    int x_start = x2;
-    struct Frame i_fr;
+    int tb = conv->y / 2;
+    int lr = conv->x / 2;
+    int y, x;
+    struct Frame i_fr = {0, 0, 0, 0};
     struct Frame* i_fr_ptr = &i_fr;
-    for (; y2 <= size->y; y1 = y2, y2 += conv->y){
-        for (; x2 <= size->x; x1 = x2, x2 += conv->x){
-            i_fr.y1 = y1;
-            i_fr.y2 = y2;
-            i_fr.x1 = x1;
-            i_fr.x2 = x2;
+    for (y=0; y < size->y; y++){
+        for(x=0; x < size->x; x++){
+            get_inner_frame(y, x, tb, lr, size, i_fr_ptr);
             if ((mean(map, i_fr_ptr) < threshold)
                 || (!any(arr, i_fr_ptr))
                 || all(arr, i_fr_ptr)
             )
-                replace(arr, out_arr, i_fr_ptr);
+                out_arr[y][x] = arr[y][x];
             else
-                replace(prev_arr, out_arr, i_fr_ptr);
+                out_arr[y][x] = prev_arr[y][x];
         }
-        x1 = 0;
-        x2 = x_start;
     }
+    // Free 2d array
+    for(col = 0; col < size->y; col++)
+        free(map[col]);
+    free(map);
 }
 
 /*
+
+void replace(int** from, int** to, struct Frame* f){
+    // Replace values of array 'to' inside of the frame 'f'.
+    int i, j;
+    for (i = f->y1; i < f->y2; i++)
+        for (j = f->x1; j < f->x2; j++)
+            to[i][j] = from[i][j];
+}
+
 void replace_medianblur(int** from, int** to, struct Frame* f){
     int i, j;
     int pixel = (mean(from, f) < 0.5) ? 0 : 1;
@@ -183,9 +199,9 @@ void mfilter(int** arr,
                 || (!any(arr, i_fr_ptr))
                 || all(arr, i_fr_ptr)
             )
-                replace(arr, out_arr, i_fr_ptr);
+                out_arr[y][x] = arr[y][x];
             else
-                replace(prev_arr, out_arr, i_fr_ptr);
+                out_arr[y][x] = prev_arr[y][x];
         }
     }
 }
@@ -242,6 +258,63 @@ void mfilter(int** arr,
             //printf("%d %d %d %d\n", y1, y2, x1, x2);
         }
         x1 = 0;
+    }
+}
+
+// disjoint
+void mfilter__(int** arr,
+             int** prev_arr,
+             int** out_arr,
+             struct Shape* size,
+             struct Shape* conv,
+             float threshold){
+    // Replace all subarrays of 'prev_arr' that have changed more
+    //   than 'threshold' with values of new array 'arr'. 
+
+    // Generate a difference map between arr and prev_arr
+    // (0 is differing pixel, 1 -- identical)
+    //
+    // Allocate 2d array
+    int** map;
+    int col;
+    map = malloc(size->y * sizeof(int*));
+    for(col = 0; col < size->y; col++)
+        map[col] = malloc(size->x * sizeof(int));
+    // Calc the map
+    int i, j;
+    for(i=0; i < size->y; i++){
+        for (j=0; j < size->x; j++){
+            map[i][j] = abs(arr[i][j] + prev_arr[i][j] - 1);
+        }
+    }
+    // Fill the out_arr
+    int y1 = 0;
+    int x1 = 0;
+    int y2 = size->y % conv->y;
+    if (y2 == 0)
+        y2 = conv->y;
+    int x2 = size->x % conv->x;
+    if (x2 == 0)
+        x2 = conv->x;
+    int x_start = x2;
+    struct Frame i_fr;
+    struct Frame* i_fr_ptr = &i_fr;
+    for (; y2 <= size->y; y1 = y2, y2 += conv->y){
+        for (; x2 <= size->x; x1 = x2, x2 += conv->x){
+            i_fr.y1 = y1;
+            i_fr.y2 = y2;
+            i_fr.x1 = x1;
+            i_fr.x2 = x2;
+            if ((mean(map, i_fr_ptr) < threshold)
+                || (!any(arr, i_fr_ptr))
+                || all(arr, i_fr_ptr)
+            )
+                replace(arr, out_arr, i_fr_ptr);
+            else
+                replace(prev_arr, out_arr, i_fr_ptr);
+        }
+        x1 = 0;
+        x2 = x_start;
     }
 }
 */
