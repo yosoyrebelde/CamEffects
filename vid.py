@@ -8,6 +8,8 @@ from tf_bodypix.api import download_model, load_model, BodyPixModelPaths
 from numpy.ctypeslib import ndpointer
 
 import config # PATH?
+from webcamvideostream import WebcamVideoStream
+
 
 class CShape(ctypes.Structure):
     _fields_ = [('y', ctypes.c_int),
@@ -180,55 +182,52 @@ def read(conn):
     global CONF
     read_config()
 
-    cam_orig = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    cam_orig.set(cv2.CAP_PROP_FRAME_WIDTH, CONF['width'])
-    cam_orig.set(cv2.CAP_PROP_FRAME_HEIGHT, CONF['height'])
-    cam_orig.set(cv2.CAP_PROP_FPS, CONF['fps'])
-    
+    flags = [
+        ('CAP_PROP_FPS', CONF['fps']),
+        ('CAP_PROP_FRAME_WIDTH', CONF['width']),
+        ('CAP_PROP_FRAME_HEIGHT', CONF['height']),
+    ]
+
     if CONF['background_img']:
         background = cv2.resize(
             cv2.imread(CONF['background_img']),
             (CONF['width'], CONF['height'])
         )
 
-    with pyvirtualcam.Camera(CONF['width'],
-                             CONF['height'],
-                             CONF['fps'],
-                             #print_fps=True,
-                             fmt=pyvirtualcam.PixelFormat.BGR) as cam:
-        while cam_orig.isOpened():
-            if check_to_stop(conn):
-                break
-            
-            retval, image = cam_orig.read()
-            #if not retval:
-            #    raise RuntimeError('Error fetching frame')
-
-            if CONF['mirror']:
-                new_image = cv2.flip(new_image, 1)
-
-            if not CONF['background_img']:
-                if CONF['background_blur']:
-                    background = cv2.blur(
-                        image,
-                        (CONF['background_blur'], CONF['background_blur'])
-                    )
-                else:
-                    background = image
-
-            new_image = mashup(image, background)
-
-            cam.send(new_image)
-            cam.sleep_until_next_frame()
-        
-            if CONF['imshow']:
-                cv2.imshow("Press 'q' to close", new_image)
-                if cv2.waitKey(10) & 0xFF == ord('q'):
+    with WebcamVideoStream(flags=flags, 
+                           print_fps=True) as cam_orig:
+        with pyvirtualcam.Camera(CONF['width'],
+                                 CONF['height'],
+                                 CONF['fps'],
+                                 print_fps=False,
+                                 fmt=pyvirtualcam.PixelFormat.BGR) as cam:
+            while True:
+                if check_to_stop(conn):
                     break
+                
+                image = cam_orig.read()
 
-    cam_orig.release()
-    cv2.destroyAllWindows()
-    #conn.send(True)
+                if CONF['mirror']:
+                    new_image = cv2.flip(new_image, 1)
+
+                if not CONF['background_img']:
+                    if CONF['background_blur']:
+                        background = cv2.blur(
+                            image,
+                            (CONF['background_blur'], CONF['background_blur'])
+                        )
+                    else:
+                        background = image
+
+                new_image = mashup(image, background)
+
+                cam.send(new_image)
+                cam.sleep_until_next_frame()
+            
+                if CONF['imshow']:
+                    cv2.imshow("Press 'q' to close", new_image)
+                    if cv2.waitKey(10) & 0xFF == ord('q'):
+                        break
 
 '''
 def odd(num):
