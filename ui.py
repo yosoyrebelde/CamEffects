@@ -37,6 +37,7 @@ class ProcManager(QObject):
         self.prev_state = None
 
         self.manager = Thread(target=self._start_manager)
+        self.manager.daemon = True
         self.manager.start()
 
     def _start_manager(self):
@@ -63,6 +64,8 @@ class ProcManager(QObject):
                     self._start_camera_proc()
                 elif signal == 2:
                     self._stop_camera_proc()
+            # Reduce CPU usage
+            time.sleep(0.2)
 
     def _start_camera_proc(self):
         self.camera_proc = Process(target=vid.read, 
@@ -125,6 +128,8 @@ class TrayUI:
         self.menu.addAction(self.a_quit)
 
         self.tray.setContextMenu(self.menu)
+        self.menu.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tray.activated.connect(lambda: self.menu.exec_())
 
     def change_start_stop(self, is_running):
         self.a_start.setVisible(not is_running)
@@ -132,6 +137,12 @@ class TrayUI:
         self.camera_is_running = is_running
 
     def start(self):
+
+        ### FOR TESTING, DELETE ON RELEASE #
+        import importlib
+        importlib.reload(vid)
+        ###
+
         self.manager.start()
 
     def stop(self):

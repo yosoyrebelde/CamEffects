@@ -15,8 +15,14 @@ class WebcamVideoStream:
         self.stream = cv2.VideoCapture(src)
 
         # Set flags
+        # Use 'CAP_PROP_FPS' flag to initialize a fps limiter
+        self.fpslimiter = lambda: None
         for flag in flags:
             exec(f'self.stream.set(cv2.{flag[0]}, {flag[1]})')
+            if 'CAP_PROP_FPS' in flag:
+                if flag[1] > 0:
+                    delay = 1 / (float(flag[1]) + 0.05)
+                    self.fpslimiter = lambda: time.sleep(delay)
 
         # read the first frame from the stream
         self.grabbed, self.frame = self.stream.read()
@@ -51,6 +57,7 @@ class WebcamVideoStream:
             # otherwise, read the next frame from the stream
             self.grabbed, self.frame = self.stream.read()
             self.fpscounter.frame_received()
+            self.fpslimiter()
 
     def read(self):
         # return the frame most recently read

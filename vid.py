@@ -107,13 +107,17 @@ def mask_smoothing(mask):
 
     gker2 = gker[0] * 7, gker[1] * 7
     sx, sy = gker[0] * 4, gker[1] * 4
-    mask = cv2.GaussianBlur(mask, (21,21), 12, 12)
+    mask = cv2.GaussianBlur(mask, gker2, sx, sy)
     
     # Restore the size
     mask = cv2.pyrUp(mask)
     return mask
 
 def soft_contour(img, background, mask):
+
+    mask = np.copy(mask)
+    masked_bg = cv2.bitwise_and(background, background, 
+                                mask=inverse_mask(mask))
 
     # Form the list of alphas
     da = cura = 0.2
@@ -123,8 +127,8 @@ def soft_contour(img, background, mask):
         cura += da
 
     # Form a contour for every alpha
-    blur_ksize = (4, 4)
-    blurred_img = cv2.blur(img, blur_ksize)
+    #blur_ksize = (4, 4)
+    #blurred_img = cv2.blur(img, blur_ksize)
 
     ksize = (3, 3)
     ker = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
@@ -136,7 +140,7 @@ def soft_contour(img, background, mask):
         contour_mask = xor_mask(mask, inner_mask)
         mask = inner_mask
 
-        contour_img = cv2.bitwise_and(blurred_img, blurred_img, mask=contour_mask)
+        contour_img = cv2.bitwise_and(img, img, mask=contour_mask)
         contour_bg = cv2.bitwise_and(background, background, mask=contour_mask)
         contour = cv2.addWeighted(contour_img, a, contour_bg, 1-a, 0)
 
@@ -146,7 +150,10 @@ def soft_contour(img, background, mask):
     masked_img = cv2.bitwise_and(img, img, mask=mask)
     masked_img = cv2.add(masked_img, final_contour)
 
-    return masked_img
+    # Add the background
+    final = cv2.add(masked_img, masked_bg)
+
+    return final
 
 def mashup(frame, background):
     # Predict (get mask)
@@ -157,17 +164,14 @@ def mashup(frame, background):
 
     mask = mask_smoothing(mask)
 
-    # Get masked background
-    masked_background = cv2.bitwise_and(background,
-                                        background,
-                                        mask=inverse_mask(mask))
-
-    # Get masked frame
+    #masked_background = cv2.bitwise_and(background,
+    #                                    background,
+    #                                    mask=inverse_mask(mask))
     #masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
-    masked_frame = soft_contour(frame, background, mask)
+    #final = cv2.add(masked_frame, masked_background)
 
-    # Put all together
-    final = cv2.add(masked_frame, masked_background)
+    final = soft_contour(frame, background, mask)
+    
     return final
 
 def read(conn):
@@ -195,7 +199,7 @@ def read(conn):
         )
 
     with WebcamVideoStream(flags=flags, 
-                           print_fps=True) as cam_orig:
+                           print_fps=False) as cam_orig:
         with pyvirtualcam.Camera(CONF['width'],
                                  CONF['height'],
                                  CONF['fps'],
@@ -228,44 +232,65 @@ def read(conn):
                     cv2.imshow("Press 'q' to close", new_image)
                     if cv2.waitKey(10) & 0xFF == ord('q'):
                         break
-
 '''
-def odd(num):
-    if num < 0:
-        return 0
-    num = round(num)
-    if num > 2:
-        if not num % 2:
-            return num - 1
-    return num
+def soft_contour(img, background, mask):
+    # Downsize all
 
-def diff_filter(array, prev_array):
-    #diff = np.absolute(array - prev_array)
-    diff = array - prev_array
-    diff = np.where(diff==-1, 1, diff).astype(np.uint8)
-    mask = cv2.bitwise_or(array, prev_array, mask=inverse_mask(diff)).reshape(diff.shape)
-    #rand = np.random.randint(0, 2, diff.shape)
-    #diff = cv2.bitwise_and(rand, rand, mask=diff)
-    out = np.add(mask, diff)
-    return out
+    # Get masked background
+    masked_background = cv2.bitwise_and(background,
+                                        background,
+                                        mask=inverse_mask(mask))
+    img_orig = np.copy(img)
+    mask_orig = np.copy(mask)
 
-def soft_contour(img, background, mask, ksize, alpha=0.5):
+    # Resize (just for optimization)
+    #size_orig = img.shape[1], img.shape[0]
+    img = cv2.pyrDown(img)
+    background = cv2.pyrDown(background)
+    mask = cv2.pyrDown(mask)
+
+    # Form the list of alphas
+    da = cura = 0.2
+    alpha = []
+    while cura < 1:
+        alpha.append(cura)
+        cura += da
+
+    # Form a contour for every alpha
+    #blur_ksize = (4, 4)
+    #blurred_img = cv2.blur(img, blur_ksize)
+
+    ksize = (3, 3)
     ker = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
-    inner_mask = cv2.erode(mask, ker)
-    contour_mask = xor_mask(mask, inner_mask)
+    #final_contour = np.zeros(img.shape, np.uint8)
 
-    masked_img = cv2.bitwise_and(img, img, mask=inner_mask)
-    contour = cv2.addWeighted(img, alpha, background, 1-alpha, 0)
-    contour = cv2.bitwise_and(contour, contour, mask=contour_mask)
-    masked_img = cv2.add(masked_img, contour)
-    return masked_img, inner_mask
+    for a in alpha:
 
-def brightness_corr(img):
-    max_intensity = 255.0
-    phi = 1
-    theta = 1
-    new_img = (max_intensity/phi)*(img/(max_intensity/theta))**2
-    new_img = np.array(new_img,dtype=np.uint8)
-    return new_img
+        inner_mask = cv2.erode(mask, ker)
+        contour_mask = xor_mask(mask, inner_mask)
+        mask = inner_mask
 
+        contour_img = cv2.bitwise_and(img, img, mask=contour_mask)
+        contour_bg = cv2.bitwise_and(background, background, mask=contour_mask)
+        contour = cv2.addWeighted(contour_img, a, contour_bg, 1-a, 0)
+
+        background = cv2.bitwise_and(background,
+                                     background,
+                                     mask=inverse_mask(contour_mask))
+        background = cv2.add(background, contour)
+
+    # Restore the size
+    mask = cv2.pyrUp(mask)
+    background = cv2.pyrUp(background)
+
+    contour_mask = xor_mask(mask_orig, mask)
+    final_contour = cv2.bitwise_and(background, background, mask=contour_mask)
+
+    # Apply the mask and add the contour to the image
+    masked_img = cv2.bitwise_and(img_orig, img_orig, mask=mask)
+
+    final = cv2.add(masked_background, final_contour)
+    final = cv2.add(final, masked_img)
+
+    return final
 '''
